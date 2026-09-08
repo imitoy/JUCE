@@ -189,6 +189,23 @@
   #include "native/juce_JackAudio_linux.cpp"
  #endif
 
+ #if JUCE_PIPEWIRE
+  /* Got an include error here? If so, you've either not got the PipeWire headers
+     installed, or you've not got your paths set up correctly to find its header
+     files.
+
+     The packages you need to install to get native PipeWire support are
+     "libpipewire-0.3-dev" (Debian/Ubuntu) or "pipewire" (Arch), and you'll need
+     to add the pkg-config include paths for "libpipewire-0.3" (and "libspa-0.2"
+     if it isn't pulled in automatically) to your build.
+
+     If you don't have the PipeWire development headers and don't want to build
+     JUCE with PipeWire support, just set the JUCE_PIPEWIRE flag to 0.
+  */
+  #include <pipewire/pipewire.h>
+  #include "native/juce_PipeWire_linux.cpp"
+ #endif
+
  #if (JUCE_LINUX && JUCE_BELA)
   /* Got an include error here? If so, you've either not got the bela headers
      installed, or you've not got your paths set up correctly to find its header

@@ -106,6 +106,12 @@ void AudioIODeviceType::callDeviceChangeListeners()
  AudioIODeviceType* AudioIODeviceType::createAudioIODeviceType_JACK()         { return nullptr; }
 #endif
 
+#if (JUCE_LINUX || JUCE_BSD) && JUCE_PIPEWIRE
+ AudioIODeviceType* AudioIODeviceType::createAudioIODeviceType_PipeWire()     { return new PipeWireAudioIODeviceType(); }
+#else
+ AudioIODeviceType* AudioIODeviceType::createAudioIODeviceType_PipeWire()     { return nullptr; }
+#endif
+
 #if JUCE_LINUX && JUCE_BELA
  AudioIODeviceType* AudioIODeviceType::createAudioIODeviceType_Bela()         { return new BelaAudioIODeviceType(); }
 #else

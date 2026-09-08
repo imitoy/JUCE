@@ -127,6 +127,18 @@
  #define JUCE_JACK 0
 #endif
 
+/** Config: JUCE_PIPEWIRE
+    Enables PipeWire audio devices (Linux only).
+
+    Note that this needs the PipeWire development headers to be available, and
+    your build system needs to add the appropriate include paths - this module
+    deliberately doesn't add them for you, so that projects which don't use
+    PipeWire don't need it installed.
+*/
+#ifndef JUCE_PIPEWIRE
+ #define JUCE_PIPEWIRE 0
+#endif
+
 /** Config: JUCE_BELA
     Enables Bela audio devices on Bela boards.
 */
