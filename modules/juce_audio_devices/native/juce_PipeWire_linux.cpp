@@ -94,7 +94,8 @@ static bool loadPipeWireLibrary()
 
 //==============================================================================
 // Core/context/loop
-JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_init, (int* argc, char** argv), (argc, argv))
+JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_init, (int* argc, char*** argv), (argc, argv))
+JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_deinit, (), ())
 JUCE_DECL_PIPEWIRE_FUNCTION (struct pw_main_loop*, pw_main_loop_new, (const struct spa_dict* props), (props))
 JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_main_loop_destroy, (struct pw_main_loop* loop), (loop))
 JUCE_DECL_PIPEWIRE_FUNCTION (struct pw_loop*, pw_main_loop_get_loop, (struct pw_main_loop* loop), (loop))
@@ -109,11 +110,11 @@ JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_context_destroy, (struct pw_context* contex
 JUCE_DECL_PIPEWIRE_FUNCTION (struct pw_core*, pw_context_connect, (struct pw_context* context, struct pw_properties* properties, size_t user_data_size), (context, properties, user_data_size))
 JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_core_disconnect, (struct pw_core* core), (core))
 JUCE_DECL_PIPEWIRE_FUNCTION (int, pw_core_sync, (struct pw_core* core, uint32_t id, int seq), (core, id, seq))
-JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_core_add_listener, (struct pw_core* core, struct spa_hook* listener, const struct pw_core_events* events, void* data), (core, listener, events, data))
+JUCE_DECL_PIPEWIRE_FUNCTION (int, pw_core_add_listener, (struct pw_core* core, struct spa_hook* listener, const struct pw_core_events* events, void* data), (core, listener, events, data))
 
 // Registry / proxies
 JUCE_DECL_PIPEWIRE_FUNCTION (struct pw_registry*, pw_core_get_registry, (struct pw_core* core, uint32_t version, size_t user_data_size), (core, version, user_data_size))
-JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_registry_add_listener, (struct pw_registry* registry, struct spa_hook* listener, const struct pw_registry_events* events, void* data), (registry, listener, events, data))
+JUCE_DECL_PIPEWIRE_FUNCTION (int, pw_registry_add_listener, (struct pw_registry* registry, struct spa_hook* listener, const struct pw_registry_events* events, void* data), (registry, listener, events, data))
 JUCE_DECL_PIPEWIRE_FUNCTION (struct pw_proxy*, pw_registry_bind, (struct pw_registry* registry, uint32_t id, const char* type, uint32_t version, size_t user_data_size), (registry, id, type, version, user_data_size))
 JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_proxy_destroy, (struct pw_proxy* proxy), (proxy))
 JUCE_DECL_VOID_PIPEWIRE_FUNCTION (pw_proxy_add_object_listener, (struct pw_proxy* proxy, struct spa_hook* listener, const void* funcs, void* data), (proxy, listener, funcs, data))
@@ -558,8 +559,8 @@ private:
         PipeWireConnection()
         {
             int fakeArgc = 1;
-            char fakeArgv[] = "juce";
-            char* fakeArgvPtr = fakeArgv;
+            char fakeArgv[] = { const_cast<char*> ("juce"), nullptr };
+            char** fakeArgvPtr = fakeArgv;
             juce::pw_init (&fakeArgc, &fakeArgvPtr);
         }
 
@@ -568,6 +569,7 @@ private:
             if (core != nullptr)        juce::pw_core_disconnect (core);
             if (context != nullptr)     juce::pw_context_destroy (context);
             if (mainLoop != nullptr)    juce::pw_main_loop_destroy (mainLoop);
+            juce::pw_deinit();
         }
 
         bool connect()
