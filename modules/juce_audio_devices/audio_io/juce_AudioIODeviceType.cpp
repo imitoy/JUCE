@@ -106,7 +106,7 @@ void AudioIODeviceType::callDeviceChangeListeners()
  AudioIODeviceType* AudioIODeviceType::createAudioIODeviceType_JACK()         { return nullptr; }
 #endif
 
-#if (JUCE_LINUX || JUCE_BSD) && JUCE_PIPEWIRE
+#if JUCE_LINUX && JUCE_PIPEWIRE
  AudioIODeviceType* AudioIODeviceType::createAudioIODeviceType_PipeWire()     { return createAudioIODeviceType_PipeWire_Native(); }
 #else
  AudioIODeviceType* AudioIODeviceType::createAudioIODeviceType_PipeWire()     { return nullptr; }
