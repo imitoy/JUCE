@@ -165,7 +165,7 @@
  #endif
  #undef SIZEOF
 
- #if JUCE_PIPEWIRE
+ #if JUCE_LINUX && JUCE_PIPEWIRE
   /* Got an include error here? If so, you've either not got PipeWire installed,
      or you've not got your paths set up correctly to find its header files.
 
