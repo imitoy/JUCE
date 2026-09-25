@@ -560,7 +560,7 @@ private:
         PipeWireConnection()
         {
             int fakeArgc = 1;
-            char fakeArgv[] = { const_cast<char*> ("juce"), nullptr };
+            char* fakeArgv[] = { const_cast<char*> ("juce"), nullptr };
             char** fakeArgvPtr = fakeArgv;
             juce::pw_init (&fakeArgc, &fakeArgvPtr);
         }
