@@ -803,6 +803,51 @@ private:
 };
 
 //==============================================================================
+/** A PipeWire sink/source pair.
+
+    Threading contract:
+
+    - isOpen(), isPlaying(), getCurrentSampleRate(),
+      getCurrentBufferSizeSamples() and getXRunCount() read nothing but atomics,
+      so they are safe to call from a realtime thread, provided that the platform
+      implements these atomics lock-free. getCurrentBitDepth() returns a
+      constant, so it is safe to call from anywhere.
+
+    - start(), stop(), getOutputLatencyInSamples() and getInputLatencyInSamples()
+      take the lifecycle lock. getRoutedOutputDeviceName() doesn't take that
+      lock - it only guards its own short-lived cache - but it opens a connection
+      of its own and walks the whole graph. None of them may be called from a
+      realtime thread. start() and stop() no longer wait for the callback
+      running on the calling thread (see waitForInFlightCallbacks()), but the
+      lock they take is reason enough by itself. The other stream-state getters
+      aren't realtime fodder either - several hand back a container by value -
+      so the six above are the realtime-safe stream queries.
+
+    - The lock can be held for seconds, because the monitor thread keeps it
+      across the teardown and the stream creation - it is only released while
+      waiting for the streams to start - and a rebuild is what makes an
+      audio-thread caller circular:
+
+          data loop   : process callback -> host asks for the latency -> lock
+          monitor     : holds the lock -> teardown -> loop thread
+          loop thread : pw_stream_destroy() -> data loop leaves the callback
+
+    - open() and close() must never be called from an audio thread at all.
+      Tearing the streams down blocks until PipeWire's data loop has finished the
+      process callback it is running (pw_stream_destroy() takes that loop's mutex
+      through pw_loop_locked() or a blocking pw_loop_invoke(), depending on the
+      PipeWire version), so calling them from inside the callback asks the data
+      loop to wait for itself. AudioIODevice's own contract already
+      requires stop() to flush pending callbacks before returning, which no
+      implementation can do from within one of them, so this is not a
+      restriction that is specific to this backend.
+
+    The host is never notified from the PipeWire data loop either, and never with
+    the lifecycle lock held: audioDeviceError() is sent from the monitor thread,
+    audioDeviceAboutToStart() from the monitor thread during a rebuild and from
+    whoever called start(), and audioDeviceStopped() from whoever detaches the
+    callback - start(), stop(), open() or close().
+*/
 class PipeWireAudioIODevice final : public AudioIODevice
 {
 public:
@@ -865,10 +910,10 @@ public:
                  double sampleRate,
                  int bufferSizeSamples) override
     {
-        // Taking the host callback out of the picture can block until an
-        // in-flight IO callback returns, and a host that calls back into the
-        // device from within its IO callback must not be able to deadlock
-        // against us, so this happens without the lifecycle lock held.
+        // Taking the host callback out of the picture waits for any IO callback
+        // that is already running, and that callback may well be sitting in one
+        // of the latency queries waiting for the lifecycle lock, so this has to
+        // happen before the lock is taken rather than under it.
         setCallback (nullptr);
 
         // The monitor thread may be waiting for the lifecycle lock inside
@@ -1064,7 +1109,8 @@ public:
     }
 
     //==============================================================================
-    String sinkKey, sourceKey;
+    String getSinkKey() const           { return sinkKey; }
+    String getSourceKey() const         { return sourceKey; }
 
 private:
     //==============================================================================
@@ -1127,16 +1173,22 @@ private:
     // Waits until the IO callbacks that were already running have returned.
     //
     // This must never be called while holding a lock that an IO callback can
-    // take: the host is allowed to call back into the device (start(), stop(),
-    // close(), the latency queries) from within its IO callback, and a host that
-    // does so would otherwise wait for the very callback this is waiting for.
+    // take: a host that calls in from its own IO callback would then wait for
+    // the very callback this is waiting for.
     void waitForInFlightCallbacks() const
     {
-        // A host that calls in from inside its own IO callback is the only
+        // A call that comes from inside this device's IO callback is the only
         // callback that can still be running: detachCallback() has already
         // stopped any new one from starting, and the one that is running cannot
         // return until the call that got us here returns. Waiting for it would
         // deadlock, so the wait is skipped for that one case.
+        //
+        // Skipping it only stops the wait from blocking on the calling thread.
+        // It does not make the call safe: start() and stop() take the lifecycle
+        // lock right after this, and close()/open() block on PipeWire's data
+        // loop - the loop the calling callback is running on. None of them may
+        // be called from the audio thread; see the threading contract above the
+        // class.
         if (callbackOnCurrentThread == this)
             return;
 
@@ -1684,7 +1736,11 @@ private:
         // plus 4 bytes per channel position); a pod that doesn't fit makes the
         // builder return nullptr, which is handled by stopping early.
         uint8_t podBuffer[16384];
+        // SPA_POD_BUILDER_INIT expands to a compound literal, which is a C
+        // extension that -Wpedantic reports when it is used from C++.
+        JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wpedantic")
         auto builder = SPA_POD_BUILDER_INIT (podBuffer, sizeof podBuffer);
+        JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
         struct spa_audio_info_raw info {};
         info.format = SPA_AUDIO_FORMAT_F32P;
@@ -2614,14 +2670,27 @@ private:
     }
 
     //==============================================================================
+    // The keys this device was created with, see getSinkKey()/getSourceKey().
+    String sinkKey, sourceKey;
     StringArray outputChannelNames, inputChannelNames;
 
     String lastError;
     mutable CriticalSection errorLock;
 
-    // Serialises open/close and the monitor thread's restarts. Only ever held
-    // for short state transitions - never while waiting for the loop thread or
-    // for the server, because the host may be blocked on it.
+    // Serialises open/close and the monitor thread's restarts. start() and
+    // stop() take it too (for setActive(), which round-trips through the loop),
+    // as do the two latency queries.
+    //
+    // The waits for the server at the end of open() and in restartServerSide()
+    // deliberately happen without it, but the teardown and the stream creation
+    // do not: destroying the streams waits for the PipeWire loop thread (up to
+    // loopThreadStopTimeoutMs per attempt) and pw_stream_connect() blocks until
+    // that loop has marshalled it. A rebuild therefore holds this for seconds,
+    // and every caller has to be able to afford that - the queries that only
+    // want to know which sink is being followed included.
+    //
+    // That is why nothing reachable from a realtime thread may take it, and why
+    // the class comment lists the handful of queries that are allowed there.
     CriticalSection lifecycleLock;
 
     // Serialises callback swaps. Never taken while lifecycleLock is held.
@@ -2813,8 +2882,8 @@ public:
         jassert (snapshot.valid); // need to call scanForDevices() before doing this
 
         if (auto* d = dynamic_cast<PipeWireAudioIODevice*> (device))
-            return asInput ? snapshot.inputKeys.indexOf (d->sourceKey)
-                           : snapshot.outputKeys.indexOf (d->sinkKey);
+            return asInput ? snapshot.inputKeys.indexOf (d->getSourceKey())
+                           : snapshot.outputKeys.indexOf (d->getSinkKey());
 
         return -1;
     }
